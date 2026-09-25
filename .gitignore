@@ -3,3 +3,4 @@ datasets_public
 uv.lock
 *Zone
 __pycache__
+vllm-0.10.1

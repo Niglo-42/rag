@@ -1,0 +1,59 @@
+1 Modèles de données (pydantic)
+    Avant tout, code les classes pydantic qui représentent une Source
+    (file_path, index de début/fin de caractère), 
+    une Question, un SearchResult et un Answer. 
+    C'est purement mécanique mais tout le reste du projet en dépend,
+    et la moulinette va probablement s'attendre à un format JSON précis en sortie — 
+    reprends exactement les noms de champs donnés dans ton sujet.
+
+2 Squelette CLI (Fire)
+    Crée ta classe RagCLI avec les 6 méthodes statiques vides 
+    (index, search, search_dataset, answer, answer_dataset, evaluate),
+    chacune avec les bons paramètres et type hints. Lance fire.Fire(RagCLI)
+    dans le __main__. À ce stade tout doit déjà être appelable en ligne de
+    commande même si ça ne fait rien — ça te donne un squelette sur lequel
+    greffer la logique au fur et à mesure.
+
+J'en suis là mais mes func sont vides #pass 
+
+3 Chargement + chunking du corpus
+    Écris une fonction qui parcourt ./data/raw/, lit les fichiers .py et .md,
+    et les découpe en chunks (max_chunk_size caractères). Le sujet impose 
+    deux stratégies distinctes (code vs texte) : pour le texte,
+    un split simple par paragraphes/lignes suffit ; pour le code Python,
+    découpe idéalement par fonction/classe (ou au pire par lignes)
+    pour ne pas couper au milieu d'un bloc. Pas besoin de lib externe ici,
+    un découpage avec les index de caractères (start/end)
+    suffit — tu en as besoin pour remplir MinimalSource.
+
+4 Indexation TF-IDF ou BM25
+    C'est ici que tu gagnes du temps : utilise scikit-learn
+    (TfidfVectorizer + cosine_similarity) si tu pars sur du TF-IDF, 
+    ou une lib comme rank_bm25 (pure Python, ultra simple) si tu pars
+    sur BM25. Dans les deux cas tu n'écris pas l'algo toi-même, 
+    juste : construire le corpus de chunks -> fit le vectorizer/index 
+    -> sauvegarder l'objet (pickle) pour le réutiliser dans search 
+    sans ré-indexer à chaque fois.
+
+5 search et search_dataset
+    search(query, k) transforme la requête avec le même vectorizer/index,
+    récupère les k chunks les plus proches, et reconstruit des objets
+    MinimalSource depuis tes chunks indexés. search_dataset fait juste 
+    la même chose en boucle sur un fichier de questions et exporte le
+    JSON attendu — c'est du câblage, pas de nouvelle logique.
+
+6 answer et answer_dataset (LLM)
+    Utilise transformers.pipeline('text-generation',
+    model='Qwen/Qwen3-0.6B'). Construis un message système qui contient
+    le contenu des chunks récupérés par search, et un message user avec
+    la question. Le pipeline gère l'inférence, tu n'as qu'à assembler 
+    le prompt et extraire le texte généré de la réponse. answer_dataset
+    boucle pareil sur un fichier de search_results déjà généré.
+
+7 evaluate (recall@k)
+    Compare tes retrieved_sources à la vérité terrain du dataset : 
+    pour chaque question, regarde si la source correcte apparaît 
+    dans le top-k, en considérant un chunk comme correct si son
+    intervalle de caractères chevauche celui de la vérité terrain 
+    avec un IoU >= 0.05 (pas besoin d'un match exact). 
+    Calcule ensuite le pourcentage de bonnes réponses pour k=1,3,5,10.
