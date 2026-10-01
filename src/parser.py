@@ -1,9 +1,13 @@
 from pathlib import Path
 from tqdm import tqdm
 from .models import MinimalSource
-import time
-
 BASE = "data/raw/vllm-0.10.1"
+
+
+class Chunk():
+    def __init__(self, min_src: MinimalSource, content: str) -> Chunk:
+        self.min_src = min_src
+        self.content = content
 
 def parse() -> tuple[list[Path], list[Path], list[Path]]:
     return (sorted(Path(BASE).rglob("*.py"), key = lambda p: p.as_posix()),
@@ -28,56 +32,119 @@ def open_files(paths: list[Path]) -> dict[Path, str]:
             contents[path] = text
     return contents
 
-def assign(metas: list,
-           chunks: list,
-           path: str,
-           start: int, cut: int, content: str):
-    metas.append(MinimalSource(file_path=path,
-                               first_character_index=start,
-                               last_character_index=cut))
-    chunks.append(content)
+def split_by_size(content: str, start: int, end: int, max_chunk_size: int) -> list[tuple[int, int]]:
+    res = []
+    while start < end:
+        limit = start + max_chunk_size
+        if limit >= end:
+            res.append((start, end))
+            break
+        cut = content.rfind('\n\n', start, limit)
+        if cut == -1:
+            cut = content.rfind('\n', start, limit)
+        cut = limit if cut == -1 else cut + 1
+        res.append((start, cut))
+        start = cut
+    return res
 
-def create_chunks_txt(txt: dict[Path, str],
-                     max_chunk_size: int,
-                     separators: list[str]) -> tuple[list[str],
-                                             list[MinimalSource]]:
-    metas = []
-    chunks = []
-    for path, content in txt.items():
-        if path.name != "SECURITY.md":
+def find_python_block_starts(content: str) -> list[int]:
+    lines = content.splitlines(keepends=True)
+    line_starts = []
+    offset = 0
+    for line in lines:
+        line_starts.append(offset)
+        offset += len(line)
+    limits = []
+    paren_depth = 0
+    in_decorator_run = False
+    for i, line in enumerate(lines):
+        if paren_depth > 0:
+            paren_depth += line.count("(") + line.count("[") + line.count("{")
+            paren_depth -= line.count(")") + line.count("]") + line.count("}")
             continue
-        start = 0
-        cut = max_chunk_size
-        include = "\n" in separators
-        while start < len(content):
-            if start + max_chunk_size >= len(content):
-                assign(metas, chunks, path.as_posix(), start, len(content), content[start:len(content)])
-                start += max_chunk_size
-            else:
-                limit = start + max_chunk_size
-                idx = [content.rfind(separator, start, limit) for separator in separators]
-                pos = max(idx) if any(i != -1 for i in idx) else -1
-                cut = pos + include if pos != -1 else limit
-                assign(metas, chunks, path.as_posix(), start, cut - include, content[start:cut])
-                start = cut
-        debugg(chunks, metas)
-    return (chunks, metas)
+        line = line.strip()
+        if line == "" or line.startswith("#"):
+            continue
+        if line.startswith("@"):
+            if not in_decorator_run:
+                limits.append(line_starts[i])
+                in_decorator_run = True
+            paren_depth += line.count("(") - line.count(")")
+            continue
+        if (line.startswith("def ") or line.startswith("async def ")
+            or line.startswith("class ")):
+            if not in_decorator_run:
+                limits.append(line_starts[i])
+            in_decorator_run = False
+            paren_depth += line.count("(") - line.count(")")
+            continue
+        if line.startswith("if __name__"):
+            limits.append(line_starts[i])
+            in_decorator_run = False
+            continue
+        in_decorator_run = False
+    return limits
 
-def debugg(chunks: list[str], metas: list[MinimalSource]) -> None:
-    for met, chunk in zip(metas, chunks):
-        print(met.first_character_index, met.last_character_index)
-        print(chunk)
-        print()
+def is_heading(stripped_line: str) -> bool:
+    hash_count = 0
+    while hash_count < len(stripped_line) and stripped_line[hash_count] == "#":
+        hash_count += 1
+    if hash_count == 0 or hash_count > 6:
+        return False
+    return hash_count < len(stripped_line) and stripped_line[hash_count] == " "
 
-def create_chunks(py: dict[Path, str],
-                  md: dict[Path, str],
-                  txt: dict[Path, str],
-                  max_chunk_size: int) -> None:
-    chunk_txt = create_chunks_txt(txt, max_chunk_size, ["\n\n"])
-    chunk_txt = create_chunks_txt(md, max_chunk_size, ["#", "##", "###", "####", "#####", "######"])
-    # 
-    # version python doit etre differente
-    # on doit verif que ya un (\n ou \t avant "def" ou "async def" ou "class")
-    # aussi il faut verifier les décorateurs au dessus donc while str + "@" on check et on recule starta moins qu'on assume
-    # que les décorateur et le @ si eux aussi sont précédés d'un \n ou \t alors c'est un décorateur et on coupe ici point.
-    # donc meme regle pour tout le monde
+def find_markdown_block_starts(content: str) -> list[int]:
+    block_starts = []
+    offset = 0
+    in_block = False
+    for line in content.splitlines(keepends=True):
+        line_stripped = line.strip()
+        if line_stripped.startswith("```") or line_stripped.startswith("~~~"):
+            in_block = not in_block
+        elif not in_block and is_heading(line_stripped):
+            block_starts.append(offset)
+        offset += len(line)
+    return block_starts
+
+def build_blocks(content: str, limits: list[int]) -> list[tuple[int, int]]:
+    if len(limits) == 0 or limits[0] != 0:
+        limits = [0] + limits
+    ends = limits[1:] + [len(content)]
+    return list(zip(limits, ends))
+
+def make_chunks_for_one_file(path: Path, content: str,
+                             limits: list[int],
+                             max_chunk_size: int) -> list[Chunk]:
+    chunks = []
+    for block_start, block_end in build_blocks(content, limits):
+        if block_end - block_start <= max_chunk_size:
+            blocks = [(block_start, block_end)]
+        else:
+            blocks = split_by_size(content, block_start, block_end, max_chunk_size)
+
+        for start, end in blocks:
+            text = content[start:end]
+            if text.strip() == "":
+                continue
+            chunks.append(Chunk(
+                min_src=MinimalSource(
+                file_path=path.as_posix(),
+                first_character_index=start,
+                last_character_index=end),
+                content=text,
+            ))
+    return chunks
+
+
+def create_chunks(py: dict[Path, str], md: dict[Path, str],
+                  txt: dict[Path, str], max_chunk_size: int) -> list[Chunk]:
+    all_chunks = []
+    for path, content in py.items():
+        limits = find_python_block_starts(content)
+        all_chunks += make_chunks_for_one_file(path, content, limits, max_chunk_size)
+    for path, content in md.items():
+        limits = find_markdown_block_starts(content)
+        all_chunks += make_chunks_for_one_file(path, content, limits, max_chunk_size)
+    for path, content in txt.items():
+        all_chunks += make_chunks_for_one_file(path, content, [], max_chunk_size)
+    return all_chunks

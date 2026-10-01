@@ -14,8 +14,6 @@
     commande même si ça ne fait rien — ça te donne un squelette sur lequel
     greffer la logique au fur et à mesure.
 
-J'en suis là mais mes func sont vides #pass 
-
 3 Chargement + chunking du corpus
     Écris une fonction qui parcourt ./data/raw/, lit les fichiers .py et .md,
     et les découpe en chunks (max_chunk_size caractères). Le sujet impose 
