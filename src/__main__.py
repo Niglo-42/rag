@@ -1,7 +1,10 @@
 import fire
 from .parser import parse, open_files, create_chunks
 from pathlib import Path
-from .retriever import build_bm25_index, load_bm25_index, search_questions
+from .retriever import build_bm25_index, load_bm25_index, \
+search_questions, fetch_questions, save_answers, build_search_results
+import json
+
 
 class RagCLI:
     @staticmethod
@@ -14,21 +17,42 @@ class RagCLI:
             all_chunks = create_chunks(d_py, d_md, d_txt, max_chunk_size)
         except OSError as e:
             print(e)
+            exit(1)
         build_bm25_index(all_chunks, "data/processed")
-        retriever = load_bm25_index("data/processed")
-        min_src = search_questions(retriever, ["What HTTP endpoint is used to dynamically load a LoRA adapter in vLLM?"], 5)
-        for src in min_src:
-            print(Path(src.file_path).read_text()[src.first_character_index:src.last_character_index])
-            print("---------------")
-        print(min_src)
+        print("Ingestion complete! Indices saved under data/processed/")
 
     @staticmethod
     def search(query: str, k: int = 5) -> None:
-        pass
+        if k <= 0:
+            print(f"k must be a positive integer, got {k}")
+            exit(1)
+        retriever = load_bm25_index("data/processed")
+        min_src = search_questions(retriever, [query], k)[0]
+        for src in min_src:
+            print(src.file_path)
+            print(src.first_character_index, ":", src.last_character_index)
+            # print(Path(src.file_path).read_text()[
+            #     src.first_character_index:src.last_character_index])
 
     @staticmethod
-    def search_dataset(dataset_path: str, save_dir: str, k: int) -> None:
-        pass
+    def search_dataset(dataset_path: str, k: int, save_directory: str) -> None:
+        if k <= 0:
+            print(f"k must be a positive integer, got {k}")
+            exit(1)
+        try:
+            unanswered_questions = fetch_questions(dataset_path)
+        except (OSError, ValueError, json.JSONDecodeError) as e:
+            print(e)
+            exit(1)
+        questions = [question.question for question in unanswered_questions]
+        retriever = load_bm25_index("data/processed")
+        answers = search_questions(retriever, questions, k)
+        lst_min_s_r = build_search_results(unanswered_questions, answers)
+        try:
+            save_answers(lst_min_s_r, save_directory, k, dataset_path)
+        except OSError as e:
+            print(e)
+            exit(1)
 
     @staticmethod
     def answer(query: str, k: int) -> None:

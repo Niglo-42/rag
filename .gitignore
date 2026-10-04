@@ -1,5 +1,5 @@
 .venv
-datasets_public
+data
 uv.lock
 *Zone
 __pycache__
