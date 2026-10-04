@@ -47,7 +47,7 @@ search_dataset: install
 	uv run python -m src search_dataset --dataset_path 'data/datasets/UnansweredQuestions/dataset_docs_public.json' --k $(K) --save_directory data/output/search_results/UnansweredQuestions
 
 answer: install
-	uv run python -m src answer "$(QUERY)"
+	uv run python -m src answer "$(QUERY)" --k $(K)
 
 answer-dataset: install
 	uv run python -m src answer_dataset --student_search_results_path data/output/search_results/UnansweredQuestions/dataset_code_public.json --save_directory data/output/search_results_and_answer/AnsweredQuestions

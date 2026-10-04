@@ -4,10 +4,23 @@ from pathlib import Path
 from .retriever import build_bm25_index, load_bm25_index, \
 search_questions, fetch_questions, save_answers, build_search_results
 import json
+from .llm import load_model, build_context, generate_answer
 
 
 class RagCLI:
-    retriever = load_bm25_index("data/processed")
+    retriever = None
+    model = None
+    tokenizer = None
+
+    @staticmethod
+    def _ensure_retriever() -> None:
+        if RagCLI.retriever is None:
+            RagCLI.retriever = load_bm25_index("data/processed")
+
+    @staticmethod
+    def _ensure_model() -> None:
+        if RagCLI.model is None or RagCLI.tokenizer is None:
+            RagCLI.tokenizer, RagCLI.model = load_model()
 
     @staticmethod
     def index(max_chunk_size: int = 2000) -> None:
@@ -28,6 +41,7 @@ class RagCLI:
         if k <= 0:
             print(f"k must be a positive integer, got {k}")
             exit(1)
+        RagCLI._ensure_retriever()
         min_src = search_questions(RagCLI.retriever, [query], k)[0]
         for src in min_src:
             print(src.file_path)
@@ -45,6 +59,7 @@ class RagCLI:
         except (OSError, ValueError, json.JSONDecodeError) as e:
             print(e)
             exit(1)
+        RagCLI._ensure_retriever()
         questions = [question.question for question in unanswered_questions]
         answers = search_questions(RagCLI.retriever, questions, k)
         lst_min_s_r = build_search_results(unanswered_questions, answers)
@@ -56,12 +71,21 @@ class RagCLI:
 
     @staticmethod
     def answer(query: str, k: int) -> None:
-        pass
+        if k <= 0:
+            print(f"k must be a positive integer, got {k}")
+            exit(1)
+        RagCLI._ensure_retriever()
+        RagCLI._ensure_model()
+        answers = search_questions(RagCLI.retriever, [query], k)[0]
+        answer = generate_answer(RagCLI.tokenizer, RagCLI.model, query, answers)
+        print(answer)
 
     @staticmethod
     def answer_dataset(student_search_results_path: str,
                        save_directory: str) -> None:
-        pass
+        if not RagCLI.tokenizer or not RagCLI.model:
+            RagCLI.tokenizer, RagCLI.model = load_model()
+        
 
     @staticmethod
     def evaluate(student_search_results_path: str,
