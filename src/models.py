@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Optional
 import uuid
 
 class MinimalSource(BaseModel):
@@ -12,6 +12,7 @@ class MinimalSource(BaseModel):
     file_path: str
     first_character_index: int
     last_character_index: int
+    content: Optional[str] = None
 
 
 class UnansweredQuestion(BaseModel):
