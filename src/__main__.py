@@ -7,6 +7,8 @@ import json
 
 
 class RagCLI:
+    retriever = load_bm25_index("data/processed")
+
     @staticmethod
     def index(max_chunk_size: int = 2000) -> None:
         py, md, txt = parse()
@@ -26,8 +28,7 @@ class RagCLI:
         if k <= 0:
             print(f"k must be a positive integer, got {k}")
             exit(1)
-        retriever = load_bm25_index("data/processed")
-        min_src = search_questions(retriever, [query], k)[0]
+        min_src = search_questions(RagCLI.retriever, [query], k)[0]
         for src in min_src:
             print(src.file_path)
             print(src.first_character_index, ":", src.last_character_index)
@@ -45,8 +46,7 @@ class RagCLI:
             print(e)
             exit(1)
         questions = [question.question for question in unanswered_questions]
-        retriever = load_bm25_index("data/processed")
-        answers = search_questions(retriever, questions, k)
+        answers = search_questions(RagCLI.retriever, questions, k)
         lst_min_s_r = build_search_results(unanswered_questions, answers)
         try:
             save_answers(lst_min_s_r, save_directory, k, dataset_path)

@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 from typing import List, Optional
 import uuid
 
+
 class MinimalSource(BaseModel):
     """
     always built from the root of the project (relative)
@@ -12,7 +13,6 @@ class MinimalSource(BaseModel):
     file_path: str
     first_character_index: int
     last_character_index: int
-    content: Optional[str] = None
 
 
 class UnansweredQuestion(BaseModel):
