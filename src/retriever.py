@@ -19,7 +19,7 @@ def expand_identifiers(text: str) -> str:
 
 def build_bm25_index(chunks: list[Chunk], index_dir: str) -> None:
     """Tokenize every chunk, build the BM25 index, and persist it to disk."""
-    texts = [chunk.content for chunk in chunks]
+    texts = [expand_identifiers(chunk.content) for chunk in chunks]
     metadata = [chunk.min_src.model_dump() for chunk in chunks]
     assert len(texts) == len(metadata)
     corpus_tokens = bm25s.tokenize(texts, stopwords=None, stemmer=None,
@@ -36,7 +36,7 @@ def load_bm25_index(index_dir: str) -> bm25s.BM25:
 def search_questions(retriever: bm25s.BM25, questions: list[str],
                         k: int) -> list[list[MinimalSource]]:
     """Return the top-k sources for a single question."""
-    query_tokens = bm25s.tokenize(questions, stopwords=None, stemmer=None)
+    query_tokens = bm25s.tokenize([expand_identifiers(q) for q in questions], stopwords=None, stemmer=None)
     results, scores = retriever.retrieve(query_tokens, k=k, show_progress=True)
     sources = []
     for res in results:
