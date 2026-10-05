@@ -1,10 +1,14 @@
 import fire
 from .parser import parse, open_files, create_chunks
 from pathlib import Path
-from .retriever import build_bm25_index, load_bm25_index, \
-search_questions, fetch_questions, save_answers, build_search_results
+from tqdm import tqdm
+from .models import MinimalAnswer
+from .retriever import (build_bm25_index, load_bm25_index, search_questions,
+                        fetch_questions, save_answers, build_search_results,
+                        fetch_search_results, save_answer_results,
+                        fetch_answered_questions, evaluate_search_results)
 import json
-from .llm import load_model, build_context, generate_answer
+from .llm import load_model, generate_answer
 
 
 class RagCLI:
@@ -82,15 +86,47 @@ class RagCLI:
 
     @staticmethod
     def answer_dataset(student_search_results_path: str,
-                       save_directory: str) -> None:
-        if not RagCLI.tokenizer or not RagCLI.model:
-            RagCLI.tokenizer, RagCLI.model = load_model()
+                    save_directory: str) -> None:
+        try:
+            results = fetch_search_results(student_search_results_path)
+        except (OSError, ValueError, json.JSONDecodeError) as e:
+            print(e)
+            exit(1)
+        RagCLI._ensure_model()
+        answered = []
+        for result in tqdm(results.search_results, desc="Generating answers"):
+            answer_text = generate_answer(RagCLI.tokenizer, RagCLI.model,
+                                        result.question, result.retrieved_sources)
+            answered.append(MinimalAnswer(
+                question_id=result.question_id,
+                question=result.question,
+                retrieved_sources=result.retrieved_sources,
+                answer=answer_text,
+            ))
+        try:
+            save_answer_results(answered, save_directory, results.k,
+                                student_search_results_path)
+        except OSError as e:
+            print(e)
+            exit(1)
         
 
     @staticmethod
-    def evaluate(student_search_results_path: str,
-                 dataset_path: str, k: int) -> None:
-        pass
+    def evaluate(student_search_results_path: str, dataset_path: str,
+                k: int) -> None:
+        if k <= 0:
+            print(f"k must be a positive integer, got {k}")
+            exit(1)
+        try:
+            results = fetch_search_results(student_search_results_path)
+            truth = fetch_answered_questions(dataset_path)
+        except (OSError, ValueError, json.JSONDecodeError) as e:
+            print(e)
+            exit(1)
+        scores = evaluate_search_results(results, truth, k)
+        print(f"Questions evaluated: {len(results.search_results)}")
+        for level in (1, 3, 5, 10):
+            print(f"Recall@{level}: {scores[level]:.3f} ({scores[level] * 100:.1f}%)")
 
 if __name__ == "__main__":
     try:

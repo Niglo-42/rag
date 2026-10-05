@@ -30,7 +30,7 @@ debug: install
 	$(PYTHON) -m pdb -m src
 
 clean:
-	rm -rf data/processed/*
+	
 	rm -rf data/output/search_results/*
 	rm -rf data/output/search_results_and_answer/*
 
